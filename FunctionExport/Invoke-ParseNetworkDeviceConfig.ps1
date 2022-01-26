@@ -25,7 +25,7 @@ function Invoke-ParseNetworkDeviceConfig
 
         .PARAMETER CustomProperty
             Add custom property eg.
-            -CustomProperty @{Name = 'Speed'; RegEx = '^mode Eth (\d+)g'; ScriptBlock = {$Matches[1]}}
+            -CustomProperty @{Name = 'Speed'; RegEx = '^mode Eth (\d+)g'; ScriptBlock = {$_[1]}}
 
         .EXAMPLE
             Parse-Config -Path switch01.config -Interface
@@ -208,7 +208,7 @@ function Invoke-ParseNetworkDeviceConfig
                         {
                             if ($line -match $cp.RegEx)
                             {
-                                $object | Add-Member -NotePropertyName $cp.Name -NotePropertyValue (& $cp.ScriptBlock)
+                                $object | Add-Member -NotePropertyName $cp.Name -NotePropertyValue (ForEach-Object -InputObject $Matches -Process $cp.ScriptBlock)
                                 break
                             }
                         }
