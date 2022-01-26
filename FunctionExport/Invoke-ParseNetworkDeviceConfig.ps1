@@ -15,12 +15,16 @@ function Invoke-ParseNetworkDeviceConfig
 
         .PARAMETER Type
             Not used at the moment
+            Config file format
 
-        .PARAMETER Output
-            Not used at the moment
+        .PARAMETER Interface
+            Return interfaces as objects
+
+        .PARAMETER CustomType
+            Return a custom type from config file as object
 
         .EXAMPLE
-            Parse-Config -Path switch01.config
+            Parse-Config -Path switch01.config -Interface
     #>
 
     [CmdletBinding()]
@@ -37,15 +41,19 @@ function Invoke-ParseNetworkDeviceConfig
         [Parameter()]
         [ValidateSet('Generic')]
         [System.String]
-        $Type,
+        $Type = 'Generic',
 
         [Parameter()]
-        [ValidateSet('Interfaces')]
-        [System.String]
-        $Output
+        [System.Management.Automation.SwitchParameter]
+        $Interface,
+
+        [Parameter()]
+        [System.String[]]
+        $CustomType = @()
     )
 
-    Write-Verbose -Message "Process begin (ErrorActionPreference: $ErrorActionPreference)"
+    Write-Verbose -Message "Begin (ErrorActionPreference: $ErrorActionPreference)"
+    $origErrorActionPreference = $ErrorActionPreference
 
     # We do this instead of begin/process/end
     if ($Input -and $Path)
@@ -67,7 +75,8 @@ function Invoke-ParseNetworkDeviceConfig
             foreach ($p in $Path)
             {
                 "Reading file $Path" | Write-Verbose
-                Get-Content -Raw -Path $Path | Invoke-ParseNetworkDeviceConfig
+                $null = $PSBoundParameters.Remove('Path')
+                Get-Content -Raw -Path $Path | Invoke-ParseNetworkDeviceConfig @PSBoundParameters
             }
         }
         elseif ($Config)
@@ -86,71 +95,99 @@ function Invoke-ParseNetworkDeviceConfig
                 Write-Warning "Hostname not found"
                 $hostname = ''
             }
-            
-            $interfacesHash = @{}
-            $interfaces = @()
-            $regexInterface = '(?<=^|\n)interface[ \t]+(.+?)[ \t]*(\r?\n[ \t]*(.*?)[ \t]*)*?(?=((\r?\n)?$|\r?\n[ \t]*((!|exit|end|interface|cli)([ \t][^\r\n]+)?)?[ \t]*(\r?\n|$)))'
-            foreach ($r1 in [regex]::Matches($conf, $regexInterface))
-            {
-                $name = $r1.Groups[1].Value
-                $interface = [NetworkInterface] @{
-                    Hostname  = $hostname
-                    Name      = $name
-                    ConfLines = $r1.Groups[3].Captures.Value
-                    Conf      = $r1.Value
-                }
-                $interfaces += $interface
-                $interfacesHash[$name] = $interface
-            }
 
-            foreach ($interface in $interfaces)
+            switch ($Type)
             {
-                foreach ($line in $interface.ConfLines)
+                'Generic'
                 {
-                    if ($line -match 'description (.*)')
-                    {
-                        $interface.description = $Matches[1]
-                    }
-                    elseif ($line -match 'ip(v4)? address (([0-9\.]+)[ /]([0-9\.]+))')
-                    {
-                        $ip = $Matches[2]
-                        $interface.IPv4Address    = Get-IPv4Address -Ip $ip -IpOnly
-                        $interface.IPv4Mask       = Get-IPv4Address -Ip $ip -MaskQuadDotOnly
-                        $interface.IPv4MaskLength = Get-IPv4Address -Ip $ip -MaskLengthOnly
-                        $interface.IPv4Cidr       = Get-IPv4Address -Ip $ip
-                        $interface.IPv4Subnet     = Get-IPv4Address -Ip $ip -Subnet -IpOnly
-                        $interface.IPv4SubnetCidr = Get-IPv4Address -Ip $ip -Subnet
-                    }
-                    elseif ($line -match 'ipv6 address ((\S+)/(\S+))')
-                    {
-                        $ip = $Matches[1]
-                        $interface.IPv6Address    = Get-IPv6Address -Ip $ip -IPOnly
-                        $interface.IPv6Prefix     = Get-IPv6Address -Ip $ip -WithPrefix
-                        $interface.IPv6Cidr       = Get-IPv6Address -Ip $ip -PrefixOnly
-                        $interface.IPv6Subnet     = Get-IPv6Address -Ip $ip -Subnet -IpOnly
-                        $interface.IPv6SubnetCidr = Get-IPv6Address -Ip $ip -Subnet
-
-                    }
-                    elseif ($line -match 'bundle id (\d+) ')
-                    {
-                        $g = $interface.MemberOf = "Bundle-Ether$($Matches[1])"
-                        if ($interfacesHash.ContainsKey($g)) { $interfacesHash[$g].Members += $interface.Name }
-                    }
-                    elseif ($line -match 'channel-group (\d+) ')
-                    {
-                        $g = $interface.MemberOf = "port-channel$($Matches[1])"
-                        if ($interfacesHash.ContainsKey($g)) { $interfacesHash[$interface.MemberOf].Members += $interface.Name }
-                    }
+                    $regexObject = '(?<=^|\n){0}[ \t]+(.+?)[ \t]*(\r?\n[ \t]*(.*?)[ \t]*)*?(?=((\r?\n)?$|\r?\n[ \t]*((!|exit|end|{0})([ \t][^\r\n]+)?)?[ \t]*(\r?\n|$)))'
+                    $regexObjectGroupName      = 1
+                    $regexObjectGroupConfLines = 3
                 }
+                default {throw 'Unknown error'}
             }
 
-            foreach ($interface in $interfaces)
+            if ($Interface -and -not $CustomType.Contains('interface')) {$CustomType += 'interface'}
+
+            $objects = @()
+            $objectsHash = @{}
+            foreach ($t in $CustomType)
             {
-                $interface.Member = $interface.Members -join ','
+                $objectsHash[$t] = @{}
+                # FIXXXME - should we test that $t don't contain any weird characters?
+                $re = $regexObject -f $t
+                "Parsing type $t with $re" | Write-Verbose
+                $objectClass = 'NetworkGeneric'
+                if ($Interface -and $t -eq 'interface') {$objectClass = 'NetworkInterface'}
+                foreach ($m in [regex]::Matches($conf, $re))
+                {
+                    $name = $m.Groups[$regexObjectGroupName].Value
+                    $object = New-Object -TypeName $objectClass -Property @{
+                        Hostname  = $hostname
+                        Name      = $name
+                        Type      = $t
+                        ConfLines = $m.Groups[3].Captures.Value
+                        Conf      = $m.Value
+                    }
+                    $objects += $object
+                    $objectsHash[$t][$name] = $object
+                }
+            }
+            
+            if ($Interface)
+            {
+                $interfaceObjectsHash = $objectsHash['interface']
+                $interfaceObjects = $objects.Where({$_ -is [NetworkInterface]})
+
+                foreach ($interfaceObject in $interfaceObjects)
+                {
+                    foreach ($line in $interfaceObject.ConfLines)
+                    {
+                        if ($line -match 'description (.*)')
+                        {
+                            $interfaceObject.description = $Matches[1]
+                        }
+                        elseif ($line -match 'ip(v4)? address (([0-9\.]+)[ /]([0-9\.]+))')
+                        {
+                            $ip = $Matches[2]
+                            $interfaceObject.IPv4Address    = Get-IPv4Address -Ip $ip -IpOnly
+                            $interfaceObject.IPv4Mask       = Get-IPv4Address -Ip $ip -MaskQuadDotOnly
+                            $interfaceObject.IPv4MaskLength = Get-IPv4Address -Ip $ip -MaskLengthOnly
+                            $interfaceObject.IPv4Cidr       = Get-IPv4Address -Ip $ip
+                            $interfaceObject.IPv4Subnet     = Get-IPv4Address -Ip $ip -Subnet -IpOnly
+                            $interfaceObject.IPv4SubnetCidr = Get-IPv4Address -Ip $ip -Subnet
+                        }
+                        elseif ($line -match 'ipv6 address ((\S+)/(\S+))')
+                        {
+                            $ip = $Matches[1]
+                            $interfaceObject.IPv6Address    = Get-IPv6Address -Ip $ip -IPOnly
+                            $interfaceObject.IPv6Prefix     = Get-IPv6Address -Ip $ip -WithPrefix
+                            $interfaceObject.IPv6Cidr       = Get-IPv6Address -Ip $ip -PrefixOnly
+                            $interfaceObject.IPv6Subnet     = Get-IPv6Address -Ip $ip -Subnet -IpOnly
+                            $interfaceObject.IPv6SubnetCidr = Get-IPv6Address -Ip $ip -Subnet
+
+                        }
+                        elseif ($line -match 'bundle id (\d+) ')
+                        {
+                            $g = $interfaceObject.MemberOf = "Bundle-Ether$($Matches[1])"
+                            if ($interfaceObjectsHash.ContainsKey($g)) { $interfaceObjectsHash[$g].Members += $interfaceObject.Name }
+                        }
+                        elseif ($line -match 'channel-group (\d+) ')
+                        {
+                            $g = $interfaceObject.MemberOf = "port-channel$($Matches[1])"
+                            if ($interfaceObjectsHash.ContainsKey($g)) { $interfaceObjectsHash[$interfaceObject.MemberOf].Members += $interfaceObject.Name }
+                        }
+                    }
+                }
+
+                foreach ($interfaceObject in $interfaceObjects)
+                {
+                    $interfaceObject.Member = $interfaceObject.Members -join ','
+                }
             }
 
             #Return
-            $interfaces
+            $objects
         }
     }
     catch
@@ -167,5 +204,5 @@ function Invoke-ParseNetworkDeviceConfig
         $ErrorActionPreference = $origErrorActionPreference
     }
 
-    Write-Verbose -Message 'Process end'
+    Write-Verbose -Message 'End'
 }

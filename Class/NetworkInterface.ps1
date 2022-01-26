@@ -1,9 +1,8 @@
-class NetworkInterface
+class NetworkInterface : NetworkGeneric
 {
-    [string]   $Hostname
-    [string]   $Name
-    [string]   $Conf
-    [string[]] $ConfLines
+    [string]   $Hostname  # Comes from NetworkGeneric, listed here so order of properties are logical
+    [string]   $Type      # ditto
+    [string]   $Name      # ditto
     [string]   $MemberOf
     [string[]] $Members
     [string]   $Member
