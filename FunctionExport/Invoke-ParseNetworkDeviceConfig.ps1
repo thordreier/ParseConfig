@@ -108,9 +108,10 @@ function Invoke-ParseNetworkDeviceConfig
             {
                 'Generic'
                 {
-                    $regexObject = '(?<=^|\n){0}[ \t]+(.+?)[ \t]*(\r?\n[ \t]*(.*?)[ \t]*)*?(?=((\r?\n)?$|\r?\n[ \t]*((!|exit|end|{0})([ \t][^\r\n]+)?)?[ \t]*(\r?\n|$)))'
-                    $regexObjectGroupName      = 1
-                    $regexObjectGroupConfLines = 3
+                    $regexObject = '(?<=^|\n)({0}[ \t]+(.+?))[ \t]*(\r?\n[ \t]*(.*?)[ \t]*)*?(?=((\r?\n)?$|\r?\n[ \t]*((!|exit|end|{0})([ \t][^\r\n]+)?)?[ \t]*(\r?\n|$)))'
+                    $regexObjectGroupObjectLine = 1
+                    $regexObjectGroupName       = 2
+                    $regexObjectGroupConfLines  = 4
                 }
                 default {throw 'Unknown error'}
             }
@@ -134,7 +135,7 @@ function Invoke-ParseNetworkDeviceConfig
                         Hostname  = $hostname
                         Name      = $name
                         Type      = $t
-                        ConfLines = $m.Groups[3].Captures.Value
+                        ConfLines = @($m.Groups[$regexObjectGroupObjectLine].Value) + $m.Groups[$regexObjectGroupConfLines].Captures.Value
                         Conf      = $m.Value
                     }
                     $objects += $object
