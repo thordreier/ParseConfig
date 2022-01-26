@@ -39,10 +39,13 @@ PARAMETERS
         
     -Type <String>
         Not used at the moment
+        Config file format
         
     -Interface [<SwitchParameter>]
+        Return interfaces as objects
         
     -CustomType <String[]>
+        Return a custom type from config file as object
         
     <CommonParameters>
         This cmdlet supports the common parameters: Verbose, Debug,
@@ -52,7 +55,7 @@ PARAMETERS
     
     -------------------------- EXAMPLE 1 --------------------------
     
-    PS C:\>Parse-Config -Path switch01.config
+    PS C:\>Parse-Config -Path switch01.config -Interface
     
     
     

@@ -147,6 +147,10 @@ function Invoke-ParseNetworkDeviceConfig
                         {
                             $interfaceObject.description = $Matches[1]
                         }
+                        elseif ($line -match 'speed (.*)')
+                        {
+                            $interfaceObject.speed = $Matches[1]
+                        }
                         elseif ($line -match 'ip(v4)? address (([0-9\.]+)[ /]([0-9\.]+))')
                         {
                             $ip = $Matches[2]
