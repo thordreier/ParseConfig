@@ -23,6 +23,10 @@ function Invoke-ParseNetworkDeviceConfig
         .PARAMETER CustomType
             Return a custom type from config file as object
 
+        .PARAMETER CustomProperty
+            Add custom property eg.
+            -CustomProperty @{Name = 'Speed'; RegEx = '^mode Eth (\d+)g'; ScriptBlock = {$Matches[1]}}
+
         .EXAMPLE
             Parse-Config -Path switch01.config -Interface
     #>
@@ -49,7 +53,11 @@ function Invoke-ParseNetworkDeviceConfig
 
         [Parameter()]
         [System.String[]]
-        $CustomType = @()
+        $CustomType = @(),
+
+        [Parameter()]
+        [array]
+        $CustomProperty = @()
     )
 
     Write-Verbose -Message "Begin (ErrorActionPreference: $ErrorActionPreference)"
@@ -189,6 +197,25 @@ function Invoke-ParseNetworkDeviceConfig
                     $interfaceObject.Member = $interfaceObject.Members -join ','
                 }
             }
+
+            if ($CustomProperty)
+            {
+                foreach ($object in $objects)
+                {
+                    foreach ($cp in $CustomProperty)
+                    {
+                        foreach ($line in $object.ConfLines)
+                        {
+                            if ($line -match $cp.RegEx)
+                            {
+                                $object | Add-Member -NotePropertyName $cp.Name -NotePropertyValue (& $cp.ScriptBlock)
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+
 
             #Return
             $objects

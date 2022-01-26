@@ -21,9 +21,9 @@ SYNOPSIS
     
     
 SYNTAX
-    Invoke-ParseNetworkDeviceConfig [-Path] <String[]> [-Type <String>] [-Interface] [-CustomType <String[]>] [<CommonParameters>]
+    Invoke-ParseNetworkDeviceConfig [-Path] <String[]> [-Type <String>] [-Interface] [-CustomType <String[]>] [-CustomProperty <Array>] [<CommonParameters>]
     
-    Invoke-ParseNetworkDeviceConfig -Config <String[]> [-Type <String>] [-Interface] [-CustomType <String[]>] [<CommonParameters>]
+    Invoke-ParseNetworkDeviceConfig -Config <String[]> [-Type <String>] [-Interface] [-CustomType <String[]>] [-CustomProperty <Array>] [<CommonParameters>]
     
     
 DESCRIPTION
@@ -46,6 +46,10 @@ PARAMETERS
         
     -CustomType <String[]>
         Return a custom type from config file as object
+        
+    -CustomProperty <Array>
+        Add custom property eg.
+        -CustomProperty @{Name = 'Speed'; RegEx = '^mode Eth (\d+)g'; ScriptBlock = {$Matches[1]}}
         
     <CommonParameters>
         This cmdlet supports the common parameters: Verbose, Debug,
