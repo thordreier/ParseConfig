@@ -4,10 +4,16 @@ class NetworkInterface : NetworkGeneric
     [string]   $Type      # ditto
     [string]   $Name      # ditto
     [string]   $Description
+    [string]   $Shutdown
     [string]   $Speed
-    [string]   $MemberOf
-    [string[]] $Members
-    [string]   $Member
+    [string]   $Mtu
+    [string]   $VlanUntagged
+    [string]   $VlanTagged
+    [string[]] $VlanTaggedList = @()
+    [string]   $PortUntagged
+    [string[]] $PortUntaggedList = @()
+    [string]   $PortTagged
+    [string[]] $PortTaggedList = @()
     [string]   $IPv4Address
     [string]   $IPv4Mask
     [string]   $IPv4MaskLength
@@ -19,4 +25,7 @@ class NetworkInterface : NetworkGeneric
     [string]   $IPv6Cidr
     [string]   $IPv6Subnet
     [string]   $IPv6SubnetCidr
+    [string]   $MemberOf
+    [string]   $Members
+    [string[]] $MembersList = @()
 }

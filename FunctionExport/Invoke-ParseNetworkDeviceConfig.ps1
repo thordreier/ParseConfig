@@ -63,6 +63,36 @@ function Invoke-ParseNetworkDeviceConfig
     Write-Verbose -Message "Begin (ErrorActionPreference: $ErrorActionPreference)"
     $origErrorActionPreference = $ErrorActionPreference
 
+    function SplitAndExpand ([string] $List)
+    {
+        $r = '^(.*[^\d])?(\d+)$'
+        $pre = ''
+        if ($List -match '^(\S+\s+)(.+)$')
+        {
+            $pre  = $Matches[1]
+            $List = $Matches[2]
+        }
+        foreach ($a in ($List -split ','))
+        {
+            $b,$c = $a -split '-'
+            if ($c)
+            {
+                # We assume something like 1/1-1/20 - 1/1-2/20 will not work
+                if (($d = $b -replace $r,'$1') -eq ($c -replace $r,'$1'))
+                {
+                    foreach ($e in ($b -replace $r,'$2')..($c -replace $r,'$2'))
+                    {
+                        "$pre$d$e"
+                    }
+                }
+            }
+            else
+            {
+                "$pre$b"
+            }
+        }
+    }
+
     # We do this instead of begin/process/end
     if ($Input -and $Path)
     {
@@ -148,54 +178,126 @@ function Invoke-ParseNetworkDeviceConfig
                 $interfaceObjectsHash = $objectsHash['interface']
                 $interfaceObjects = $objects.Where({$_ -is [NetworkInterface]})
 
-                foreach ($interfaceObject in $interfaceObjects)
+                foreach ($io in $interfaceObjects)
                 {
-                    foreach ($line in $interfaceObject.ConfLines)
+                    foreach ($line in $io.ConfLines)
                     {
-                        if ($line -match 'description (.*)')
+                        if     ($line -match '^description ("(.+)"|(.+))$')         { $io.Description = $Matches.Values | Select-Object -First 1 }
+                        elseif ($line -match '^shutdown$')                          { $io.Shutdown = 'yes' }
+                        elseif ($line -match '^no shutdown$')                       { $io.Shutdown = 'no' }
+                        elseif ($line -match '^speed (.+)')                         { $io.Speed = $Matches[1] }
+                        elseif ($line -match '^mtu (.+)')                           { $io.Mtu = $Matches[1] }
+                        elseif ($line -match '^switchport mode trunk$')             { if (-not $io.VlanTagged) {$io.VlanTagged = 'all'} }
+                        elseif ($line -match '^switchport access vlan (.+)')
                         {
-                            $interfaceObject.description = $Matches[1]
+                            $v = $io.VlanUntagged = $Matches[1]
+                            if (($o = $interfaceObjectsHash["vlan$v"]) -or ($o = $interfaceObjectsHash["vlan $v"]))
+                            {
+                                $o.PortUntaggedList += $io.Name
+                            }
                         }
-                        elseif ($line -match 'speed (.*)')
+                        elseif ($line -match '^switchport trunk allowed vlan (.+)')
                         {
-                            $interfaceObject.speed = $Matches[1]
+                            $io.VlanTagged = if ($io.VlanTagged -and $io.VlanTagged -ne 'all') { $io.VlanTagged, $Matches[1] -join ',' } else { $Matches[1] }
+                            $io.VlanTaggedList += $vtl = SplitAndExpand -List $io.VlanTagged
+                            foreach ($v in $vtl)
+                            {
+                                if (($o = $interfaceObjectsHash["vlan$v"]) -or ($o = $interfaceObjectsHash["vlan $v"]))
+                                {
+                                    $o.PortTaggedList += $io.Name
+                                }
+                            }
                         }
-                        elseif ($line -match 'ip(v4)? address (([0-9\.]+)[ /]([0-9\.]+))')
+                        elseif ($line -match '^untagged (.+)')
+                        {
+                            $io.PortUntagged = if ($io.PortUntagged) { $io.PortUntagged, $Matches[1] -join ',' } else { $Matches[1] }
+                            $io.PortUntaggedList += $pl = SplitAndExpand -List $Matches[1]
+                            foreach ($p in $pl)
+                            {
+                                if ($o = $interfaceObjectsHash[$p])
+                                {
+                                    $o.VlanUntagged = $io.Name -replace '^vlan\s?'
+                                }
+                            }
+                        }
+                        elseif ($line -match '^tagged (.+)')
+                        {
+                            $io.PortTagged = if ($io.PortTagged) { $io.PortTagged, $Matches[1] -join ',' } else { $Matches[1] }
+                            $io.PortTaggedList += $pl = SplitAndExpand -List $Matches[1]
+                            foreach ($p in $pl)
+                            {
+                                if ($o = $interfaceObjectsHash[$p])
+                                {
+                                    $o.VlanTaggedList += $io.Name -replace '^vlan\s?'
+                                }
+                            }
+                        }
+                        elseif ($line -match '^ip(v4)? address (([0-9\.]+)[ /]([0-9\.]+))')
                         {
                             $ip = $Matches[2]
-                            $interfaceObject.IPv4Address    = Get-IPv4Address -Ip $ip -IpOnly
-                            $interfaceObject.IPv4Mask       = Get-IPv4Address -Ip $ip -MaskQuadDotOnly
-                            $interfaceObject.IPv4MaskLength = Get-IPv4Address -Ip $ip -MaskLengthOnly
-                            $interfaceObject.IPv4Cidr       = Get-IPv4Address -Ip $ip
-                            $interfaceObject.IPv4Subnet     = Get-IPv4Address -Ip $ip -Subnet -IpOnly
-                            $interfaceObject.IPv4SubnetCidr = Get-IPv4Address -Ip $ip -Subnet
+                            $io.IPv4Address    = Get-IPv4Address -Ip $ip -IpOnly
+                            $io.IPv4Mask       = Get-IPv4Address -Ip $ip -MaskQuadDotOnly
+                            $io.IPv4MaskLength = Get-IPv4Address -Ip $ip -MaskLengthOnly
+                            $io.IPv4Cidr       = Get-IPv4Address -Ip $ip
+                            $io.IPv4Subnet     = Get-IPv4Address -Ip $ip -Subnet -IpOnly
+                            $io.IPv4SubnetCidr = Get-IPv4Address -Ip $ip -Subnet
                         }
-                        elseif ($line -match 'ipv6 address ((\S+)/(\S+))')
+                        elseif ($line -match '^ipv6 address ((\S+)/(\S+))')
                         {
                             $ip = $Matches[1]
-                            $interfaceObject.IPv6Address    = Get-IPv6Address -Ip $ip -IPOnly
-                            $interfaceObject.IPv6Prefix     = Get-IPv6Address -Ip $ip -WithPrefix
-                            $interfaceObject.IPv6Cidr       = Get-IPv6Address -Ip $ip -PrefixOnly
-                            $interfaceObject.IPv6Subnet     = Get-IPv6Address -Ip $ip -Subnet -IpOnly
-                            $interfaceObject.IPv6SubnetCidr = Get-IPv6Address -Ip $ip -Subnet
+                            $io.IPv6Address    = Get-IPv6Address -Ip $ip -IPOnly
+                            $io.IPv6Prefix     = Get-IPv6Address -Ip $ip -WithPrefix
+                            $io.IPv6Cidr       = Get-IPv6Address -Ip $ip -PrefixOnly
+                            $io.IPv6Subnet     = Get-IPv6Address -Ip $ip -Subnet -IpOnly
+                            $io.IPv6SubnetCidr = Get-IPv6Address -Ip $ip -Subnet
 
                         }
-                        elseif ($line -match 'bundle id (\d+) ')
+                        elseif ($line -match '^bundle id (\d+) ')
                         {
-                            $g = $interfaceObject.MemberOf = "Bundle-Ether$($Matches[1])"
-                            if ($interfaceObjectsHash.ContainsKey($g)) { $interfaceObjectsHash[$g].Members += $interfaceObject.Name }
+                            $g = $io.MemberOf = "Bundle-Ether$($Matches[1])"
+                            if ($o = $interfaceObjectsHash[$g]) { $o.MembersList += $io.Name }
                         }
-                        elseif ($line -match 'channel-group (\d+) ')
+                        elseif ($line -match '^channel-group (\d+) ')
                         {
-                            $g = $interfaceObject.MemberOf = "port-channel$($Matches[1])"
-                            if ($interfaceObjectsHash.ContainsKey($g)) { $interfaceObjectsHash[$interfaceObject.MemberOf].Members += $interfaceObject.Name }
+                            $g = $io.MemberOf = "port-channel$($Matches[1])"
+                            if ($o = $interfaceObjectsHash[$g]) { $o.MembersList += $io.Name }
+                        }
+                        elseif ($line -match '^channel-member (.+)')
+                        {
+                            $io.Members = if ($io.Members) { $io.Members, $Matches[1] -join ',' } else { $Matches[1] }
+                            $io.MembersList += $ml = SplitAndExpand -List $io.Members
+                            foreach ($m in $ml)
+                            {
+                                if ($o = $interfaceObjectsHash[$m])
+                                {
+                                    $o.MemberOf += $io.Name
+                                }
+                            }
                         }
                     }
                 }
 
-                foreach ($interfaceObject in $interfaceObjects)
+                foreach ($io in $interfaceObjects)
                 {
-                    $interfaceObject.Member = $interfaceObject.Members -join ','
+                    if ($io.VlanTagged -eq 'all')
+                    {
+                        foreach ($vio in $interfaceObjects)
+                        {
+                            if ($vio.Name -match '^vlan\s?(\d+)$')
+                            {
+                                $io.VlanTaggedList  += $Matches[1]
+                                $vio.PortTaggedList += $io.Name
+                            }
+                        }
+                    }
+                }
+
+                foreach ($io in $interfaceObjects)
+                {
+                    if (-not $io.VlanTagged)   { $io.VlanTagged   = $io.VlanTaggedList   -join ',' }
+                    if (-not $io.PortUntagged) { $io.PortUntagged = $io.PortUntaggedList -join ',' }
+                    if (-not $io.PortTagged)   { $io.PortTagged   = $io.PortTaggedList   -join ',' }
+                    if (-not $io.Members)      { $io.Members      = $io.MembersList      -join ',' }
                 }
             }
 
